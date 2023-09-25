@@ -10,6 +10,7 @@ import torchvision.transforms as T
 from torchvision import models
 import pytorch_lightning as pl
 import wandb
+import datetime
 
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback
@@ -27,7 +28,7 @@ class_weights_race = (1.0, 1.0, 1.0) # can be changed to balance accuracy
 batch_size = 150
 epochs = 20
 num_workers = 4
-img_data_dir = '../../'
+img_data_dir = '../../data/'
 
 class WandbCallback(Callback):
     def on_epoch_end(self, trainer, pl_module):
@@ -188,12 +189,12 @@ class ResNet(pl.LightningModule):
         grid = torchvision.utils.make_grid(batch['image'][0:4, ...], nrow=2, normalize=True)
         self.logger.experiment.add_image('images', grid, self.global_step)
 
-        if optimizer_idx == 0:
-            return loss_disease
-        if optimizer_idx == 1:
-            return loss_sex
-        if optimizer_idx == 2:
-            return loss_race
+        # if optimizer_idx == 0:
+        #     return loss_disease
+        # if optimizer_idx == 1:
+        #     return loss_sex
+        # if optimizer_idx == 2:
+        #     return loss_race
 
     def validation_step(self, batch, batch_idx):
         loss_disease, loss_sex, loss_race = self.process_batch(batch)
@@ -455,8 +456,14 @@ def main(hparams):
         imsave(os.path.join(temp_dir, 'sample_' + str(idx) + '.jpg'), sample['image'].astype(np.uint8))
 
     wandb_logger = WandbLogger()
-    checkpoint_callback = ModelCheckpoint(monitor="val_loss_disease", mode='min')
-
+    #checkpoint_callback = ModelCheckpoint(monitor="val_loss_disease", mode='min')
+    checkpoint_callback = ModelCheckpoint(monitor="val_loss_disease", 
+                                        mode='min', 
+                                        dirpath='models/',
+                                        filename= 'chexpert-multitask-densenet-{epoch:02d}-{val_loss_disease:.2f}',
+                                        save_top_k=3,        # Number of best checkpoints to keep
+                                        save_last=True,
+                                        verbose=True)
     # train
     trainer = pl.Trainer(
         callbacks=[checkpoint_callback],
@@ -468,6 +475,7 @@ def main(hparams):
     trainer.logger._default_hp_metric = False
     trainer.fit(model, data)
 
+    print('Best Model Path', trainer.checkpoint_callback.best_model_path)
     model = model_type.load_from_checkpoint(trainer.checkpoint_callback.best_model_path, num_classes_disease=num_classes_disease, num_classes_sex=num_classes_sex, num_classes_race=num_classes_race, class_weights_race=class_weights_race)
 
     use_cuda = torch.cuda.is_available()
@@ -489,43 +497,50 @@ def main(hparams):
     preds_val_disease, targets_val_disease, logits_val_disease, preds_val_sex, targets_val_sex, logits_val_sex, preds_val_race, targets_val_race, logits_val_race = test(model, data.val_dataloader(), device)
     
     df = pd.DataFrame(data=preds_val_disease, columns=cols_names_classes_disease)
+    df['Model Path'] = trainer.checkpoint_callback.best_model_path
     df_logits = pd.DataFrame(data=logits_val_disease, columns=cols_names_logits_disease)
     df_targets = pd.DataFrame(data=targets_val_disease, columns=cols_names_targets_disease)
     df = pd.concat([df, df_logits, df_targets], axis=1)
-    df.to_csv(os.path.join(out_dir, 'predictions.val.disease.csv'), index=False)
+    date = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    df.to_csv(os.path.join(out_dir, f'predictions.val.disease.{date}.csv'), index=False)
 
     df = pd.DataFrame(data=preds_val_sex, columns=cols_names_classes_sex)
+    df['Model Path'] = trainer.checkpoint_callback.best_model_path
     df_logits = pd.DataFrame(data=logits_val_sex, columns=cols_names_logits_sex)
     df = pd.concat([df, df_logits], axis=1)
     df['target'] = targets_val_sex
-    df.to_csv(os.path.join(out_dir, 'predictions.val.sex.csv'), index=False)
+    df.to_csv(os.path.join(out_dir, f'predictions.val.sex.{date}.csv'), index=False)
 
     df = pd.DataFrame(data=preds_val_race, columns=cols_names_classes_race)
+    df['Model Path'] = trainer.checkpoint_callback.best_model_path
     df_logits = pd.DataFrame(data=logits_val_race, columns=cols_names_logits_race)
     df = pd.concat([df, df_logits], axis=1)
     df['target'] = targets_val_race
-    df.to_csv(os.path.join(out_dir, 'predictions.val.race.csv'), index=False)
+    df.to_csv(os.path.join(out_dir, f'predictions.val.race.{date}.csv'), index=False)
 
     print('TESTING')
     preds_test_disease, targets_test_disease, logits_test_disease, preds_test_sex, targets_test_sex, logits_test_sex, preds_test_race, targets_test_race, logits_test_race = test(model, data.test_dataloader(), device)
     
     df = pd.DataFrame(data=preds_test_disease, columns=cols_names_classes_disease)
+    df['Model Path'] = trainer.checkpoint_callback.best_model_path
     df_logits = pd.DataFrame(data=logits_test_disease, columns=cols_names_logits_disease)
     df_targets = pd.DataFrame(data=targets_test_disease, columns=cols_names_targets_disease)
     df = pd.concat([df, df_logits, df_targets], axis=1)
-    df.to_csv(os.path.join(out_dir, 'predictions.test.disease.csv'), index=False)
+    df.to_csv(os.path.join(out_dir, f'predictions.test.disease.{date}.csv'), index=False)
 
     df = pd.DataFrame(data=preds_test_sex, columns=cols_names_classes_sex)
+    df['Model Path'] = trainer.checkpoint_callback.best_model_path
     df_logits = pd.DataFrame(data=logits_test_sex, columns=cols_names_logits_sex)
     df = pd.concat([df, df_logits], axis=1)
     df['target'] = targets_test_sex
-    df.to_csv(os.path.join(out_dir, 'predictions.test.sex.csv'), index=False)
+    df.to_csv(os.path.join(out_dir, f'predictions.test.sex.{date}.csv'), index=False)
 
     df = pd.DataFrame(data=preds_test_race, columns=cols_names_classes_race)
+    df['Model Path'] = trainer.checkpoint_callback.best_model_path
     df_logits = pd.DataFrame(data=logits_test_race, columns=cols_names_logits_race)
     df = pd.concat([df, df_logits], axis=1)
     df['target'] = targets_test_race
-    df.to_csv(os.path.join(out_dir, 'predictions.test.race.csv'), index=False)
+    df.to_csv(os.path.join(out_dir, f'predictions.test.race.{date}.csv'), index=False)
 
     wandb.finish()
 
@@ -533,19 +548,21 @@ def main(hparams):
 
     embeds_val, targets_val_disease, targets_val_sex, targets_val_race = embeddings(model, data.val_dataloader(), device)
     df = pd.DataFrame(data=embeds_val)
+    df['Model Path'] = trainer.checkpoint_callback.best_model_path
     df_targets_disease = pd.DataFrame(data=targets_val_disease, columns=cols_names_targets_disease)
     df = pd.concat([df, df_targets_disease], axis=1)
     df['target_sex'] = targets_val_sex
     df['target_race'] = targets_val_race
-    df.to_csv(os.path.join(out_dir, 'embeddings.val.csv'), index=False)
+    df.to_csv(os.path.join(out_dir, f'embeddings.val.{date}.csv'), index=False)
 
     embeds_test, targets_test_disease, targets_test_sex, targets_test_race = embeddings(model, data.test_dataloader(), device)
     df = pd.DataFrame(data=embeds_test)
+    df['Model Path'] = trainer.checkpoint_callback.best_model_path
     df_targets_disease = pd.DataFrame(data=targets_test_disease, columns=cols_names_targets_disease)
     df = pd.concat([df, df_targets_disease], axis=1)
     df['target_sex'] = targets_test_sex
     df['target_race'] = targets_test_race
-    df.to_csv(os.path.join(out_dir, 'embeddings.test.csv'), index=False)
+    df.to_csv(os.path.join(out_dir, f'embeddings.test.{date}.csv'), index=False)
 
 
 if __name__ == '__main__':
@@ -553,7 +570,7 @@ if __name__ == '__main__':
     parser.add_argument('--gpus', default=1)
     parser.add_argument('--dev', default=0)
     parser.add_argument('--wb', default=True)
-    parser.add_argument('--sample', default=False)
+    parser.add_argument('--sample', default=True)
 
     args = parser.parse_args()
     print(args)

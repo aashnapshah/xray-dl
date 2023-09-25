@@ -18,41 +18,27 @@ from skimage.io import imread
 from skimage.io import imsave
 from tqdm import tqdm
 from argparse import ArgumentParser
-from PIL import Image
-
-from PIL import Image
-from skimage.io import imread
-from skimage.io import imsave
-from skimage.transform import resize
 
 image_size = (224, 224)
 num_classes = 14
 batch_size = 150
 epochs = 20
 num_workers = 4
-img_data_dir = '../../'
+img_data_dir = '/n/groups/patel/aashna/xray-dl/data/'
 
 torch.cuda.empty_cache()
 
 class WandbCallback(Callback):
     def on_epoch_end(self, trainer, pl_module):
         # Log training and validation loss to Wandb
-        print(trainer.callback_metrics)
-        # wandb.log({"train_loss_callback": trainer.callback_metrics["train_loss"],
-        #            "val_loss_callback": trainer.callback_metrics["val_loss"], 
-        #            "train_acc_callback": trainer.callback_metrics["train_accuracy"],
-        #            "val_acc_callback": trainer.callback_metrics["val_accuracy"],
-        #            "val_auroc_callback": trainer.callback_metrics["val_auroc"]})
-        print('***Epoch: ', trainer.current_epoch, '***')
-        print('Train Loss: ', trainer.callback_metrics["train_loss"], 'Train Accuracy:', trainer.callback_metrics["train_accuracy"])
-        print('Validation Loss: ', trainer.callback_metrics["val_loss"], 'Validation AUROC:', trainer.callback_metrics["val_auroc"], 'Validation Accuracy:', trainer.callback_metrics["val_accuracy"])
+        wandb.log({"train_loss": trainer.callback_metrics["train_loss"],
+                   "val_loss": trainer.callback_metrics["val_loss"]})
 
 class CheXpertDataset(Dataset):
     def __init__(self, csv_file_img, image_size, resize=True, augmentation=False, pseudo_rgb = True):
         self.data = pd.read_csv(csv_file_img)
         self.image_size = image_size
         self.do_augment = augmentation
-        self.do_resize = resize
         self.pseudo_rgb = pseudo_rgb
 
         self.labels = [
@@ -70,13 +56,7 @@ class CheXpertDataset(Dataset):
             'Pleural Other',
             'Fracture',
             'Support Devices']
-        
-        self.resize = T.Compose([
-            T.ToTensor(),
-            T.Resize((224,224), antialias=True),
-            T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-        ])
-        
+
         self.augment = T.Compose([
             T.RandomHorizontalFlip(p=0.5),
             T.RandomApply(transforms=[T.RandomAffine(degrees=15, scale=(0.9, 1.1))], p=0.5),
@@ -84,7 +64,7 @@ class CheXpertDataset(Dataset):
 
         self.samples = []
         for idx, _ in enumerate(tqdm(range(len(self.data)), desc='Loading Data')):
-            img_path = img_data_dir + self.data.loc[idx, 'Path']
+            img_path = img_data_dir + self.data.loc[idx, 'path_preproc']
             img_label = np.zeros(len(self.labels), dtype='float32')
             for i in range(0, len(self.labels)):
                 img_label[i] = np.array(self.data.loc[idx, self.labels[i].strip()] == 1, dtype='float32')
@@ -98,24 +78,20 @@ class CheXpertDataset(Dataset):
     def __getitem__(self, item):
         sample = self.get_sample(item)
 
-        image = sample['image'] #torch.from_numpy(sample['image']).unsqueeze(0)
+        image = torch.from_numpy(sample['image']).unsqueeze(0)
         label = torch.from_numpy(sample['label'])
-
-        # if self.pseudo_rgb:
-        #     #image = image.repeat(3, 1, 1)
-        #     image = image.convert('RGB')
-
-        if self.do_resize:
-            image = self.resize(image)
 
         if self.do_augment:
             image = self.augment(image)
+
+        if self.pseudo_rgb:
+            image = image.repeat(3, 1, 1)
 
         return {'image': image, 'label': label}
 
     def get_sample(self, item):
         sample = self.samples[item]
-        image = Image.open(sample['image_path']).convert('RGB') #.astype(np.float32)
+        image = imread(sample['image_path']).astype(np.float32)
 
         return {'image': image, 'label': sample['label']}
 
@@ -228,7 +204,6 @@ class DenseNet(pl.LightningModule):
                 params_to_update.append(param)
         optimizer = torch.optim.Adam(params_to_update, lr=0.001)
         return optimizer
-
     def unpack_batch(self, batch):
         return batch['image'], batch['label']
 
@@ -247,9 +222,10 @@ class DenseNet(pl.LightningModule):
         labels = torch.argmax(lab, dim=1)
         train_acc = self.train_accuracy(predictions, labels)
         self.log_dict({'train_loss': loss, 'train_accuracy': train_acc}, on_epoch=True)
-        #print('Train Loss: ', loss, 'Train Accuracy:', train_acc)
 
         grid = torchvision.utils.make_grid(batch['image'][0:4, ...], nrow=2, normalize=True)
+        #self.logger.experiment.add_image('images', grid, self.global_step)
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -277,6 +253,7 @@ class DenseNet(pl.LightningModule):
 def freeze_model(model):
     for param in model.parameters():
         param.requires_grad = False
+
 
 def test(model, data_loader, device):
     model.eval()
@@ -361,14 +338,20 @@ def main(hparams):
 
     for idx in range(0,5):
         sample = data.train_set.get_sample(idx)
-        #imsave(os.path.join(temp_dir, 'sample_' + str(idx) + '.jpg'), sample['image']) #.astype(np.uint8))
+        imsave(os.path.join(temp_dir, 'sample_' + str(idx) + '.jpg'), sample['image']) #.astype(np.uint8))
 
     wandb_logger = WandbLogger()
-    checkpoint_callback = ModelCheckpoint(monitor="val_loss", mode='min')
+    checkpoint_callback = ModelCheckpoint(monitor="val_loss", 
+                                        mode='min', 
+                                        dirpath='models/',
+                                        filename= 'chexpert-disease-densenet-{epoch:02d}-{val_loss:.2f}',
+                                        save_top_k=3,        # Number of best checkpoints to keep
+                                        save_last=True,
+                                        verbose=True)
 
     # train
     trainer = pl.Trainer(
-        callbacks=[checkpoint_callback, WandbCallback()],
+        callbacks=[checkpoint_callback],
         log_every_n_steps = 5,
         max_epochs=epochs,
         devices=hparams.gpus,
@@ -392,6 +375,7 @@ def main(hparams):
     print('VALIDATION')
     preds_val, targets_val, logits_val = test(model, data.val_dataloader(), device)
     df = pd.DataFrame(data=preds_val, columns=cols_names_classes)
+    df['Model Path'] = trainer.checkpoint_callback.best_model_path
     df_logits = pd.DataFrame(data=logits_val, columns=cols_names_logits)
     df_targets = pd.DataFrame(data=targets_val, columns=cols_names_targets)
     df = pd.concat([df, df_logits, df_targets], axis=1)
@@ -400,6 +384,7 @@ def main(hparams):
     print('TESTING')
     preds_test, targets_test, logits_test = test(model, data.test_dataloader(), device)
     df = pd.DataFrame(data=preds_test, columns=cols_names_classes)
+    df['Model Path'] = trainer.checkpoint_callback.best_model_path
     df_logits = pd.DataFrame(data=logits_test, columns=cols_names_logits)
     df_targets = pd.DataFrame(data=targets_test, columns=cols_names_targets)
     df = pd.concat([df, df_logits, df_targets], axis=1)
