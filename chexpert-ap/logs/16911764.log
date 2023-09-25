@@ -1,0 +1,33 @@
+/home/aas926/miniconda3/envs/xray_env/lib/python3.9/site-packages/torch/utils/data/dataloader.py:561: UserWarning: This DataLoader will create 32 worker processes in total. Our suggested max number of worker in current system is 1, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  warnings.warn(_create_warning_msg(
+/home/aas926/miniconda3/envs/xray_env/lib/python3.9/site-packages/torch/utils/data/dataloader.py:561: UserWarning: This DataLoader will create 32 worker processes in total. Our suggested max number of worker in current system is 1, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  warnings.warn(_create_warning_msg(
+/home/aas926/miniconda3/envs/xray_env/lib/python3.9/site-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/aas926/miniconda3/envs/xray_env/lib/python3.9/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=ResNet34_Weights.IMAGENET1K_V1`. You can also use `weights=ResNet34_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+wandb: Currently logged in as: aashnashah (aashna-shah). Use `wandb login --relogin` to force relogin
+wandb: wandb version 0.15.9 is available!  To upgrade, please run:
+wandb:  $ pip install wandb --upgrade
+wandb: Tracking run with wandb version 0.15.8
+wandb: Run data is saved locally in /n/groups/patel/aashna/ai-vengers/ap/wandb/run-20230906_005759-hmghyhv6
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run crisp-dream-1
+wandb: ⭐️ View project at https://wandb.ai/aashna-shah/chexnet-pa-pred
+wandb: 🚀 View run at https://wandb.ai/aashna-shah/chexnet-pa-pred/runs/hmghyhv6
+/home/aas926/miniconda3/envs/xray_env/lib/python3.9/site-packages/torch/utils/data/dataloader.py:561: UserWarning: This DataLoader will create 32 worker processes in total. Our suggested max number of worker in current system is 1, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  warnings.warn(_create_warning_msg(
+Traceback (most recent call last):
+  File "/n/groups/patel/aashna/ai-vengers/ap/CheXpert_resnet34_ap_detection_pt_premade_splits.py", line 172, in <module>
+    loss = criterion(outputs, labels)
+  File "/home/aas926/miniconda3/envs/xray_env/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/aas926/miniconda3/envs/xray_env/lib/python3.9/site-packages/torch/nn/modules/loss.py", line 720, in forward
+    return F.binary_cross_entropy_with_logits(input, target,
+  File "/home/aas926/miniconda3/envs/xray_env/lib/python3.9/site-packages/torch/nn/functional.py", line 3163, in binary_cross_entropy_with_logits
+    raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
+ValueError: Target size (torch.Size([256])) must be the same as input size (torch.Size([256, 1]))
+wandb: Waiting for W&B process to finish... (failed 1). Press Control-C to abort syncing.
+wandb: - 0.006 MB of 0.021 MB uploaded (0.000 MB deduped)wandb: \ 0.021 MB of 0.021 MB uploaded (0.000 MB deduped)wandb: 🚀 View run crisp-dream-1 at: https://wandb.ai/aashna-shah/chexnet-pa-pred/runs/hmghyhv6
+wandb: Synced 6 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20230906_005759-hmghyhv6/logs
