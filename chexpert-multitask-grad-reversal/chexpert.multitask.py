@@ -14,7 +14,7 @@ from sklearn.metrics import roc_auc_score
 
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback
-from torchmetrics.classification import Accuracy, MulticlassAccuracy, AUROC, MultilabelAUROC
+from torchmetrics.classification import MultilabelAccuracy, Accuracy, MulticlassAccuracy, AUROC, MultilabelAUROC
 from skimage.io import imread
 from skimage.io import imsave
 from tqdm import tqdm
@@ -150,13 +150,24 @@ class ResNet(pl.LightningModule):
         out_race
 
     def configure_optimizers(self):
-        params_backbone = list(self.backbone.parameters())
-        params_disease = params_backbone + list(self.fc_disease.parameters())
-        params_race = params_backbone + list(self.fc_race.parameters())
-        optim_disease = torch.optim.Adam(params_disease, lr=0.001)
-        optim_race = torch.optim.Adam(params_race, lr=0.001)
-        return optim_disease, optim_race
+        # params_backbone = list(self.backbone.parameters())
+        # params_disease = params_backbone + list(self.fc_disease.parameters())
+        # params_race = params_backbone + list(self.fc_race.parameters())
+        # optim_disease = torch.optim.Adam(params_disease, lr=0.001)
+        # optim_race = torch.optim.Adam(params_race, lr=0.001)
+        # return optim_disease, optim_race
 
+        params_backbone = list(self.backbone.parameters())
+        params_disease = list(self.fc_disease.parameters())
+        params_race = list(self.fc_race.parameters())
+
+        # Combine parameters of both tasks
+        all_params = params_backbone + params_disease + params_race
+
+        # Create a single optimizer for all parameters
+        optimizer = torch.optim.Adam(all_params, lr=0.001)
+        return optimizer 
+    
     def unpack_batch(self, batch):
         return batch['image'], batch['label_disease'], batch['label_race']
 
@@ -185,9 +196,9 @@ class ResNet(pl.LightningModule):
 
 
 class DenseNet(pl.LightningModule):
-    def __init__(self, num_classes_disease, num_classes_race, class_weights_race):
+    def __init__(self, num_classes_disease, num_classes_race, class_weights_race, alpha):
         super().__init__()
-        self.automatic_optimization = False  # Disable automatic optimization
+        #self.automatic_optimization = False  # Disable automatic optimization
         self.num_classes_disease = num_classes_disease
         self.num_classes_race = num_classes_race
         self.class_weights_race = torch.FloatTensor(class_weights_race)
@@ -198,9 +209,11 @@ class DenseNet(pl.LightningModule):
         self.fc_connect = nn.Identity(num_features)
         self.backbone.classifier = self.fc_connect
 
+        self.alpha = alpha
+
         # Define accuracy and AUROC metrics for each task
-        self.disease_accuracy = MulticlassAccuracy(num_classes=num_classes_disease)
-        self.race_accuracy = Accuracy(task='multiclass', num_classes=num_classes_race)
+        self.disease_accuracy = MultilabelAccuracy(num_labels=num_classes_disease)
+        self.race_accuracy = MulticlassAccuracy(num_classes=num_classes_race)
         
         self.disease_auroc = MultilabelAUROC(num_labels=num_classes_disease, average='macro')
         self.race_auroc = AUROC(task="multiclass", num_classes=num_classes_race)
@@ -212,13 +225,23 @@ class DenseNet(pl.LightningModule):
         return out_disease, out_race
 
     def configure_optimizers(self):
-        params_backbone = list(self.backbone.parameters())
-        params_disease = params_backbone + list(self.fc_disease.parameters())
-        params_race = params_backbone + list(self.fc_race.parameters())
-        optim_disease = torch.optim.Adam(params_disease, lr=0.001)
-        optim_race = torch.optim.Adam(params_race, lr=0.001)
+        # params_backbone = list(self.backbone.parameters())
+        # params_disease = params_backbone + list(self.fc_disease.parameters())
+        # params_race = params_backbone + list(self.fc_race.parameters())
+        # optim_disease = torch.optim.Adam(params_disease, lr=0.001)
+        # optim_race = torch.optim.Adam(params_race, lr=0.001)
+        # return optim_disease, optim_race
 
-        return optim_disease, optim_race
+        params_backbone = list(self.backbone.parameters())
+        params_disease = list(self.fc_disease.parameters())
+        params_race = list(self.fc_race.parameters())
+
+        # Combine parameters of both tasks
+        all_params = params_backbone + params_disease + params_race
+
+        # Create a single optimizer for all parameters
+        optimizer = torch.optim.Adam(all_params, lr=0.001)
+        return optimizer 
 
     def unpack_batch(self, batch):
         return batch['image'], batch['label_disease'], batch['label_race']
@@ -233,29 +256,26 @@ class DenseNet(pl.LightningModule):
         prob_disease = torch.sigmoid(out_disease)
         prob_race = F.softmax(out_race, dim=1)
 
-        return loss_disease, loss_race, prob_disease, prob_race, lab_disease, lab_race
+        alpha = self.alpha
+        loss_total = loss_disease - alpha*loss_race  # Adjust the weight as needed
+
+        return loss_total, loss_disease, loss_race, prob_disease, prob_race, lab_disease, lab_race
 
     # for multiple optimizers
     def training_step(self, batch, batch_idx): 
-        opt1, opt2 = self.optimizers()  # Manually access the optimizers
-        loss_disease, loss_race, prob_disease, prob_race, lab_disease, lab_race = self.process_batch(batch)
-        self.log_dict({"train_loss_disease": loss_disease, "train_loss_race": loss_race})
+        #opt1, opt2 = self.optimizers()  # Manually access the optimizers
+        loss_total, loss_disease, loss_race, prob_disease, prob_race, lab_disease, lab_race = self.process_batch(batch)
+        self.log_dict({"train_loss_total": loss_total, "train_loss_disease": loss_disease, "train_loss_race": loss_race})
 
-        # Assign different weights to the losses
-        alpha = 1
-        weighted_disease_loss = loss_disease
-        weighted_race_loss = -1*loss_race 
-
-        total_loss = weighted_disease_loss + loss_race  # Adjust the weight as needed
-        self.log_dict({"train_loss_total": total_loss})
-
-        opt1.zero_grad()
-        self.manual_backward(weighted_disease_loss, retain_graph=True)
-        opt1.step()
+        return loss_total 
+    
+        # opt1.zero_grad()
+        # self.manual_backward(weighted_disease_loss, retain_graph=True)
+        # opt1.step()
         
-        opt2.zero_grad()
-        self.manual_backward(weighted_race_loss)
-        opt2.step()
+        # opt2.zero_grad()
+        # self.manual_backward(weighted_race_loss)
+        # opt2.step()
 
         
     def validation_step(self, batch, batch_idx):
@@ -377,11 +397,11 @@ def main(hparams):
 
     # model
     model_type = DenseNet
-    model = model_type(num_classes_disease=num_classes_disease, num_classes_race=num_classes_race, class_weights_race=class_weights_race)
+    model = model_type(num_classes_disease=num_classes_disease, num_classes_race=num_classes_race, class_weights_race=class_weights_race, alpha=hparams.alpha)
 
     # Create output directory
     out_name = balance 
-    out_dir = 'predictions/' + out_name
+    out_dir = 'predictions/' + 'lambda-' + str(hparams.alpha) + '/' + out_name
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
@@ -394,12 +414,12 @@ def main(hparams):
         imsave(os.path.join(temp_dir, 'sample_' + str(idx) + '.jpg'), sample['image'].astype(np.uint8))
 
     wandb_logger = WandbLogger()
-    checkpoint_callback = ModelCheckpoint(monitor="val_loss_disease", 
+    checkpoint_callback = ModelCheckpoint(monitor="val_loss_total", 
                                           mode='min', 
-                                          dirpath='models/' + out_name,
-                                          filename='chexpert-multitask-grad-rev:1-densenet-' + out_name + '-{epoch:02d}-{val_loss_disease:.2f}-{val_loss_race:.2f}',
+                                          dirpath='models/' + 'lambda-' + str(hparams.alpha) + '/' + out_name,
+                                          filename='chexpert-multitask-lambda:' + str(hparams.alpha) + '-densenet-' + out_name + '-{epoch:02d}-{val_loss_disease:.2f}-{val_loss_race:.2f}',
                                           save_last=True,
-                                          save_top_k=10,
+                                          save_top_k=3,
                                           verbose=True)
     
     # train
@@ -413,7 +433,7 @@ def main(hparams):
     trainer.logger._default_hp_metric = False
     trainer.fit(model, data)
 
-    model = model_type.load_from_checkpoint(trainer.checkpoint_callback.best_model_path, num_classes_disease=num_classes_disease, num_classes_race=num_classes_race, class_weights_race=class_weights_race)
+    model = model_type.load_from_checkpoint(trainer.checkpoint_callback.best_model_path, num_classes_disease=num_classes_disease, num_classes_race=num_classes_race, class_weights_race=class_weights_race, alpha=hparams.alpha)
 
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:" + str(hparams.dev) if use_cuda else "cpu")
@@ -482,6 +502,7 @@ if __name__ == '__main__':
     parser.add_argument('--wb', default=True)
     parser.add_argument('--sample', default=True)
     parser.add_argument('--balance', default=False)
+    parser.add_argument('--alpha', default=0.01)
 
     args = parser.parse_args()
     print(args)
